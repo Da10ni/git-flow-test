@@ -1,0 +1,43 @@
+#!/bin/sh
+# pre-push hook - Fixed version
+
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+# Block direct pushes to protected branches
+case "$current_branch" in
+    main|development)
+        echo "❌ Direct push to $current_branch blocked!"
+        echo "✅ Use Pull Request workflow"
+        exit 1
+        ;;
+esac
+
+# Get the branch this was created from - FIXED METHOD
+parent=$(git reflog show --format="%gs" HEAD | grep "checkout: moving from" | head -1 | awk '{print $4}')
+
+echo "🔍 Debug info:"
+echo "  Current branch: $current_branch"
+echo "  Detected parent: '$parent'"
+
+# Validate branch pattern and parent
+case "$current_branch" in
+    hotfix/*)
+        if [ "$parent" != "main" ]; then
+            echo "❌ Hotfix must be from main, found: $parent"
+            exit 1
+        fi
+        ;;
+    feature/*|release/*)  
+        if [ "$parent" != "development" ]; then
+            echo "❌ Feature/Release must be from development, found: $parent"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "❌ Invalid branch name: $current_branch"
+        echo "✅ Use: feature/*, hotfix/*, release/*"
+        exit 1
+        ;;
+esac
+
+echo "✅ Branch validation passed!"
