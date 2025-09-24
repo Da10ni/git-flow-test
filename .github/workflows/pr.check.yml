@@ -1,0 +1,80 @@
+name: Git Flow Sync
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup and Sync
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Get info
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+          
+          echo "🔍 Branch merged to main: $BRANCH"
+          
+          # Only allow hotfix/* and release/* to merge into main
+          if [[ ! "$BRANCH" =~ ^(hotfix|release)/ ]]; then
+            echo "❌ INVALID MERGE TO MAIN!"
+            echo "❌ Branch: $BRANCH"
+            echo "❌ Only hotfix/* and release/* can merge to main"
+            
+            gh issue create \
+              --title "🚨 Invalid merge to main: $BRANCH" \
+              --body "Branch \`$BRANCH\` was merged to main but only hotfix/* and release/* are allowed!" \
+              --label "git-flow-violation"
+              
+            exit 1
+          fi
+          
+          echo "✅ Valid branch: $BRANCH"
+          echo "🔄 Starting sync: main → development"
+          
+          # Sync main to development
+          git fetch origin
+          git checkout development
+          
+          if git merge origin/main -m "Auto-sync: main → development after $BRANCH"; then
+            echo "✅ Merge successful!"
+            if git push origin development; then
+              echo "🎉 Successfully synced main to development!"
+            else
+              echo "❌ Push to development failed"
+              exit 1
+            fi
+          else
+            echo "⚠️ Merge conflicts detected - creating resolution PR..."
+            
+            # Abort failed merge
+            git merge --abort
+            
+            # Create conflict resolution branch
+            SYNC_BRANCH="sync-conflict-${GITHUB_RUN_NUMBER}"
+            git checkout -b $SYNC_BRANCH origin/main
+            git push origin $SYNC_BRANCH
+            
+            gh pr create \
+              --base development \
+              --head $SYNC_BRANCH \
+              --title "🚨 Sync Conflict: main → development" \
+              --body "Conflicts detected while syncing main to development after $BRANCH merge. Manual resolution needed."
+              
+            echo "✅ Conflict resolution PR created"
+          fi
