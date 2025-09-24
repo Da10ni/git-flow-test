@@ -65,30 +65,25 @@ echo "✅ Branch validation passed!"
 # echo "🎉 All validations passed! Push allowed."
 
 
-# Git Desktop compatible lint check
-echo "🔍 Checking lint compatibility..."
 
+# Lint check: run only if lint script exists
 if [ -f "package.json" ] && grep -q '"lint"' package.json; then
-    # Detect if we're running in Git Desktop (check for common Git Desktop indicators)
-    if [ -n "$GIT_EXEC_PATH" ] && (echo "$GIT_EXEC_PATH" | grep -qi "desktop\|github desktop\|GitHubDesktop"); then
-        echo "🖥️  Git Desktop detected - using manual lint verification"
-        echo "⚠️  Please ensure you've run 'npm run lint' in terminal and it passed"
-        echo "✅ Trusting manual lint verification for Git Desktop"
+    echo "🔍 Running lint check..."
+    
+    npm run lint
+    lint_exit_code=$?
+
+    if [ "$lint_exit_code" -ne 0 ]; then
+        echo ""
+        echo "❌ Lint errors found!"
+        echo "🔧 Please fix lint errors before pushing:"
+        echo "   npm run lint"
+        exit 1
     else
-        # Try running lint for terminal/command line usage
-        if npm run lint >/dev/null 2>&1; then
-            echo "✅ Lint check passed!"
-        else
-            echo "❌ Lint check failed!"
-            echo "🔧 Please fix lint errors:"
-            echo "   npm run lint"
-            echo "   # Fix any errors shown"
-            echo "   # Then push again"
-            exit 1
-        fi
+        echo "✅ Lint passed. Proceeding to push."
     fi
 else
-    echo "⚠️  No lint script found in package.json"
+    echo "⚠️ No lint script found. Skipping lint check."
 fi
 
 echo "🎉 All validations passed! Push allowed."
