@@ -19,10 +19,10 @@ function App() {
       <h1>Automation Done </h1>
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
-          count is not {count}
+          count is {count}
         </button>
         <p>
-          Edit <code>src/App.jsx</code> and save to test HMR, We have completed code coverage too i guess
+          Edit <code>src/App.jsx</code> and save to test HMR, We have completed code coverage too
         </p>
       </div>
       <p className="read-the-docs">
