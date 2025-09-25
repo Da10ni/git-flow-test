@@ -64,7 +64,7 @@ fi
 
 echo "🎉 All validations passed! Push allowed."
 
-# Coverage check
+# code amd conditional Coverage check
 if [ ! -f "package.json" ]; then
     echo "⚠️ No package.json found. Skipping coverage check."
     exit 0
