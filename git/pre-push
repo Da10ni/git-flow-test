@@ -1,124 +1,99 @@
-    #!/bin/sh
-    # pre-push hook - Fixed version
+#!/bin/sh
+# pre-push hook - Fixed version
 
-    current_branch=$(git rev-parse --abbrev-ref HEAD)
+current_branch=$(git rev-parse --abbrev-ref HEAD)
 
-    # Block direct pushes to protected branches
-    case "$current_branch" in
-        main|development)
-            echo "❌ Direct push to $current_branch blocked!"
-            echo "✅ Use Pull Request workflow"
+# Block direct pushes to protected branches
+case "$current_branch" in
+    main|development)
+        echo "❌ Direct push to $current_branch blocked!"
+        echo "✅ Use Pull Request workflow"
+        exit 1
+        ;;
+esac
+
+# Get the branch this was created from - FIXED METHOD
+parent=$(git reflog show --format="%gs" HEAD | grep "checkout: moving from" | head -1 | awk '{print $4}')
+
+echo "🔍 Debug info:"
+echo "  Current branch: $current_branch"
+echo "  Detected parent: '$parent'"
+
+# Validate branch pattern and parent
+case "$current_branch" in
+    hotfix/*)
+        if [ "$parent" != "main" ]; then
+            echo "❌ Hotfix must be from main, found: $parent"
             exit 1
-            ;;
-    esac
-
-    # Get the branch this was created from - FIXED METHOD
-    parent=$(git reflog show --format="%gs" HEAD | grep "checkout: moving from" | head -1 | awk '{print $4}')
-
-    echo "🔍 Debug info:"
-    echo "  Current branch: $current_branch"
-    echo "  Detected parent: '$parent'"
-
-    # Validate branch pattern and parent
-    case "$current_branch" in
-        hotfix/*)
-            if [ "$parent" != "main" ]; then
-                echo "❌ Hotfix must be from main, found: $parent"
-                exit 1
-            fi
-            ;;
-        feature/*|release/*)  
-            if [ "$parent" != "development" ]; then
-                echo "❌ Feature/Release must be from development, found: $parent"
-                exit 1
-            fi
-            ;;
-        *)
-            echo "❌ Invalid branch name: $current_branch"
-            echo "✅ Use: feature/*, hotfix/*, release/*"
-            exit 1
-            ;;
-    esac
-
-    echo "✅ Branch validation passed!"
-
-
-
-    # echo "🔍 Checking lint..."
-    # if [ -f "package.json" ] && grep -q '"lint"' package.json; then
-    #     if npm run lint >/dev/null 2>&1; then
-    #         echo "✅ Lint check passed!"
-    #     else
-    #         echo "❌ Lint check failed!"
-    #         echo "🔧 Please fix lint errors:"
-    #         echo "   npm run lint"
-    #         echo "   # Fix any errors shown"
-    #         echo "   # Then push again"
-    #         echo ""
-    #         echo "💡 If lint passes manually but hook still fails, use: git push --no-verify"
-    #         exit 1
-    #     fi
-    # else
-    #     echo "⚠️  No lint script found in package.json"
-    # fi
-
-    # echo "🎉 All validations passed! Push allowed."
-
-
-
-    # Lint check: run only if lint script exists
-    if [ -f "package.json" ] && grep -q '"lint"' package.json; then
-        echo "🔍 Running lint check..."
-        
-        npm run lint
-        lint_exit_code=$?
-
-        if [ "$lint_exit_code" -ne 0 ]; then
-            echo ""
-            echo "❌ Lint errors found!"
-            echo "🔧 Please fix lint errors before pushing:"
-            echo "   npm run lint"
-            exit 1
-        else
-            echo "✅ Lint passed. Proceeding to push."
         fi
+        ;;
+    feature/*|release/*)  
+        if [ "$parent" != "development" ]; then
+            echo "❌ Feature/Release must be from development, found: $parent"
+            exit 1
+        fi
+        ;;
+    *)
+        echo "❌ Invalid branch name: $current_branch"
+        echo "✅ Use: feature/*, hotfix/*, release/*"
+        exit 1
+        ;;
+esac
+
+echo "✅ Branch validation passed!"
+
+# Lint check: run only if lint script exists
+if [ -f "package.json" ] && grep -q '"lint"' package.json; then
+    echo "🔍 Running lint check..."
+    
+    npm run lint
+    lint_exit_code=$?
+
+    if [ "$lint_exit_code" -ne 0 ]; then
+        echo ""
+        echo "❌ Lint errors found!"
+        echo "🔧 Please fix lint errors before pushing:"
+        echo "   npm run lint"
+        exit 1
     else
-        echo "⚠️ No lint script found. Skipping lint check."
+        echo "✅ Lint passed. Proceeding to push."
     fi
+else
+    echo "⚠️ No lint script found. Skipping lint check."
+fi
 
-    echo "🎉 All validations passed! Push allowed."
+echo "🎉 All validations passed! Push allowed."
 
-    # code coverage and conditional coverage
-
-    if [ ! -f "package.json" ]; then
+# Coverage check
+if [ ! -f "package.json" ]; then
     echo "⚠️ No package.json found. Skipping coverage check."
     exit 0
-    fi
+fi
 
-    package_json=$(cat package.json)
+package_json=$(cat package.json)
 
-    if echo "$package_json" | grep -q '"test:cov"'; then
+if echo "$package_json" | grep -q '"test:cov"'; then
     cmd="npm run test:cov"
-    elif echo "$package_json" | grep -q '"coverage"'; then
+elif echo "$package_json" | grep -q '"coverage"'; then
     cmd="npm run coverage"
-    elif echo "$package_json" | grep -q '"test"'; then
+elif echo "$package_json" | grep -q '"test"'; then
     cmd="npm test -- --coverage --watchAll=false"
-    else
+else
     echo "⚠️ No coverage script found. Skipping coverage check."
     exit 0
-    fi
+fi
 
-    echo "🔍 Running coverage check..."
-    $cmd
-    coverage_exit_code=$?
+echo "🔍 Running coverage check..."
+$cmd
+coverage_exit_code=$?
 
-    if [ "$coverage_exit_code" -ne 0 ]; then
+if [ "$coverage_exit_code" -ne 0 ]; then
     echo "❌ Coverage check failed!"
     echo "🔧 Please check coverage issues:"
     echo "   $cmd"
     # exit 1  # Uncomment to block push
-    else
+else
     echo "✅ Coverage check passed."
-    fi
+fi
 
-    echo "🎉 All validations passed! Push allowed."
+echo "🎉 All validations passed! Push allowed."
