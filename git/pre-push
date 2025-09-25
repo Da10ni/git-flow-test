@@ -41,3 +41,49 @@ case "$current_branch" in
 esac
 
 echo "✅ Branch validation passed!"
+
+
+
+# echo "🔍 Checking lint..."
+# if [ -f "package.json" ] && grep -q '"lint"' package.json; then
+#     if npm run lint >/dev/null 2>&1; then
+#         echo "✅ Lint check passed!"
+#     else
+#         echo "❌ Lint check failed!"
+#         echo "🔧 Please fix lint errors:"
+#         echo "   npm run lint"
+#         echo "   # Fix any errors shown"
+#         echo "   # Then push again"
+#         echo ""
+#         echo "💡 If lint passes manually but hook still fails, use: git push --no-verify"
+#         exit 1
+#     fi
+# else
+#     echo "⚠️  No lint script found in package.json"
+# fi
+
+# echo "🎉 All validations passed! Push allowed."
+
+
+
+# Lint check: run only if lint script exists
+if [ -f "package.json" ] && grep -q '"lint"' package.json; then
+    echo "🔍 Running lint check..."
+    
+    npm run lint
+    lint_exit_code=$?
+
+    if [ "$lint_exit_code" -ne 0 ]; then
+        echo ""
+        echo "❌ Lint errors found!"
+        echo "🔧 Please fix lint errors before pushing:"
+        echo "   npm run lint"
+        exit 1
+    else
+        echo "✅ Lint passed. Proceeding to push."
+    fi
+else
+    echo "⚠️ No lint script found. Skipping lint check."
+fi
+
+echo "🎉 All validations passed! Push allowed."
