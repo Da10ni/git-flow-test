@@ -42,30 +42,6 @@ esac
 
 echo "✅ Branch validation passed!"
 
-
-
-# echo "🔍 Checking lint..."
-# if [ -f "package.json" ] && grep -q '"lint"' package.json; then
-#     if npm run lint >/dev/null 2>&1; then
-#         echo "✅ Lint check passed!"
-#     else
-#         echo "❌ Lint check failed!"
-#         echo "🔧 Please fix lint errors:"
-#         echo "   npm run lint"
-#         echo "   # Fix any errors shown"
-#         echo "   # Then push again"
-#         echo ""
-#         echo "💡 If lint passes manually but hook still fails, use: git push --no-verify"
-#         exit 1
-#     fi
-# else
-#     echo "⚠️  No lint script found in package.json"
-# fi
-
-# echo "🎉 All validations passed! Push allowed."
-
-
-
 # Lint check: run only if lint script exists
 if [ -f "package.json" ] && grep -q '"lint"' package.json; then
     echo "🔍 Running lint check..."
@@ -84,6 +60,40 @@ if [ -f "package.json" ] && grep -q '"lint"' package.json; then
     fi
 else
     echo "⚠️ No lint script found. Skipping lint check."
+fi
+
+echo "🎉 All validations passed! Push allowed."
+
+# Coverage check
+if [ ! -f "package.json" ]; then
+    echo "⚠️ No package.json found. Skipping coverage check."
+    exit 0
+fi
+
+package_json=$(cat package.json)
+
+if echo "$package_json" | grep -q '"test:cov"'; then
+    cmd="npm run test:cov"
+elif echo "$package_json" | grep -q '"coverage"'; then
+    cmd="npm run coverage"
+elif echo "$package_json" | grep -q '"test"'; then
+    cmd="npm test -- --coverage --watchAll=false"
+else
+    echo "⚠️ No coverage script found. Skipping coverage check."
+    exit 0
+fi
+
+echo "🔍 Running coverage check..."
+$cmd
+coverage_exit_code=$?
+
+if [ "$coverage_exit_code" -ne 0 ]; then
+    echo "❌ Coverage check failed!"
+    echo "🔧 Please check coverage issues:"
+    echo "   $cmd"
+    exit 1  
+else
+    echo "✅ Coverage check passed."
 fi
 
 echo "🎉 All validations passed! Push allowed."
