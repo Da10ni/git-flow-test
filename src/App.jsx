@@ -19,7 +19,7 @@ function App() {
       <h1>Automation Done </h1>
       <div className="card">
         <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
+          count is not {count}
         </button>
         <p>
           Edit <code>src/App.jsx</code> and save to test HMR, We have completed code coverage too i guess
