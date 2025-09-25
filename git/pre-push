@@ -91,7 +91,7 @@ if [ "$coverage_exit_code" -ne 0 ]; then
     echo "❌ Coverage check failed!"
     echo "🔧 Please check coverage issues:"
     echo "   $cmd"
-    # exit 1  # Uncomment to block push
+    exit 1  
 else
     echo "✅ Coverage check passed."
 fi
