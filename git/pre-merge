@@ -1,0 +1,46 @@
+#!/bin/sh
+# pre-merge-commit hook - Block feature/release cross-merges
+
+# Check if this is actually a merge operation
+if [ ! -f .git/MERGE_HEAD ]; then
+    # Not a merge, allow normal commits
+    exit 0
+fi
+
+current_branch=$(git rev-parse --abbrev-ref HEAD)
+
+# Get the source branch being merged
+merge_commit=$(cat .git/MERGE_HEAD)
+source_branch=$(git name-rev --name-only $merge_commit 2>/dev/null | sed 's/~.*//' | sed 's/\^.*//')
+
+# Clean up branch names (remove remotes/ prefix if present)
+source_branch=$(echo "$source_branch" | sed 's|^remotes/[^/]*/||')
+
+echo "🔍 Merge Detection:"
+echo "  Target branch: $current_branch"
+echo "  Source branch: $source_branch"
+
+# Apply blocking rules
+case "$current_branch" in
+    feature/*)
+        case "$source_branch" in
+            feature/*|release/*)
+                echo "❌ Merge blocked: $source_branch → $current_branch"
+                echo "✅ Use Pull Request workflow instead"
+                exit 1
+                ;;
+        esac
+        ;;
+    release/*)
+        case "$source_branch" in
+            feature/*|release/*)
+                echo "❌ Merge blocked: $source_branch → $current_branch"
+                echo "✅ Use Pull Request workflow instead"
+                exit 1
+                ;;
+        esac
+        ;;
+esac
+
+echo "✅ Merge allowed: $source_branch → $current_branch"
+exit 0
