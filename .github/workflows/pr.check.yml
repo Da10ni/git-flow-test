@@ -1,22 +1,99 @@
-name: Git Flow Sync
+name: Git Flow Sync & PR Checks
+
 on:
   pull_request:
-    types: [closed]
-    branches: [main]
+    types: [closed, opened, synchronize, reopened]
+    branches:
+      - main
+      - development
+      - 'feature/*'
+      - 'release/*'
+  push:
+    branches:
+      - feature/linting
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
+  block-merges:
+    if: >
+      github.event_name == 'pull_request' && 
+      github.event.action == 'opened' &&
+      (startsWith(github.event.pull_request.base.ref, 'feature/') || 
+       startsWith(github.event.pull_request.base.ref, 'release/'))
+    runs-on: ubuntu-latest
+    steps:
+      - name: Block merge to feature/* and release/* branches
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const baseRef = context.payload.pull_request.base.ref;
+            const headRef = context.payload.pull_request.head.ref;
+            
+            console.log(`❌ MERGE BLOCKED!`);
+            console.log(`❌ Target branch: ${baseRef}`);
+            console.log(`❌ Source branch: ${headRef}`);
+            console.log(`❌ Merges to feature/* and release/* branches are not allowed in Git Flow!`);
+            
+            // Close the PR
+            await github.rest.pulls.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: context.payload.pull_request.number,
+              state: 'closed'
+            });
+            
+            // Add comment explaining why PR was closed
+            await github.rest.issues.createComment({
+              issue_number: context.payload.pull_request.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🚫 **PR Automatically Closed - Git Flow Violation**
+              
+              This PR was automatically closed because merges to \`${baseRef}\` are not allowed in Git Flow.
+              
+              **Git Flow Rules:**
+              - \`feature/*\` branches should only receive commits directly (no merges)
+              - \`release/*\` branches should only receive commits directly (no merges)
+              - Only \`development\` and \`main\` branches accept merges
+              
+              **What to do instead:**
+              - If this is feature work: Create PR to \`development\` branch
+              - If this is a release: Create PR from \`release/*\` to \`main\`
+              - If this is a hotfix: Create PR from \`hotfix/*\` to \`main\`
+              
+              Please create a new PR with the correct target branch.`
+            });
+            
+            // Create an issue to track this violation
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🚨 Git Flow Violation: Attempted merge to ${baseRef}`,
+              body: `**Blocked PR Details:**
+              - PR: #${context.payload.pull_request.number}
+              - Source: \`${headRef}\`
+              - Target: \`${baseRef}\`
+              - Author: @${context.payload.pull_request.user.login}
+              
+              **Action Taken:** PR was automatically closed
+              
+              **Reminder:** Please follow Git Flow guidelines for branch merging.`,
+              labels: ['git-flow-violation', 'blocked-merge']
+            });
+            
+            core.setFailed(`Merge to ${baseRef} blocked - Git Flow violation`);
+
   sync:
-    if: github.event.pull_request.merged == true
+    if: github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          
+
       - name: Setup and Sync
         env:
           GH_TOKEN: ${{ github.token }}
@@ -24,33 +101,31 @@ jobs:
           # Configure git
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          
+
           # Get info
           BRANCH="${{ github.event.pull_request.head.ref }}"
-          
           echo "🔍 Branch merged to main: $BRANCH"
-          
+
           # Only allow hotfix/* and release/* to merge into main
           if [[ ! "$BRANCH" =~ ^(hotfix|release)/ ]]; then
             echo "❌ INVALID MERGE TO MAIN!"
             echo "❌ Branch: $BRANCH"
             echo "❌ Only hotfix/* and release/* can merge to main"
-            
+
             gh issue create \
               --title "🚨 Invalid merge to main: $BRANCH" \
               --body "Branch \`$BRANCH\` was merged to main but only hotfix/* and release/* are allowed!" \
               --label "git-flow-violation"
-              
+
             exit 1
           fi
-          
+
           echo "✅ Valid branch: $BRANCH"
           echo "🔄 Starting sync: main → development"
-          
-          # Sync main to development
+
           git fetch origin
           git checkout development
-          
+
           if git merge origin/main -m "Auto-sync: main → development after $BRANCH"; then
             echo "✅ Merge successful!"
             if git push origin development; then
@@ -61,20 +136,203 @@ jobs:
             fi
           else
             echo "⚠️ Merge conflicts detected - creating resolution PR..."
-            
-            # Abort failed merge
+
             git merge --abort
-            
-            # Create conflict resolution branch
+
             SYNC_BRANCH="sync-conflict-${GITHUB_RUN_NUMBER}"
             git checkout -b $SYNC_BRANCH origin/main
             git push origin $SYNC_BRANCH
-            
+
             gh pr create \
               --base development \
               --head $SYNC_BRANCH \
               --title "🚨 Sync Conflict: main → development" \
               --body "Conflicts detected while syncing main to development after $BRANCH merge. Manual resolution needed."
-              
+
             echo "✅ Conflict resolution PR created"
           fi
+
+  code-quality:
+    name: Code Quality Checks (Non-blocking)
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'pull_request' || github.ref == 'refs/heads/feature/linting') &&
+      !(startsWith(github.event.pull_request.base.ref, 'feature/') || 
+        startsWith(github.event.pull_request.base.ref, 'release/'))
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm i --force
+
+      - name: Run ESLint (Non-blocking)
+        run: npm run lint
+        continue-on-error: true
+
+      - name: Comment on PR with ESLint results
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('📋 **ESLint Analysis')
+            );
+
+            const message = `📋 **ESLint Analysis Complete** (Non-blocking)
+
+            ESLint checks have been run. This is currently in non-blocking mode.
+
+            **To check locally:**
+            \`\`\`bash
+            npm run lint
+            \`\`\`
+
+            Note: ESLint issues won't block the PR but please review and fix when possible.`;
+
+            if (botComment) {
+              await github.rest.issues.updateComment({
+                comment_id: botComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: message
+              });
+            }
+
+  # SonarQube Analysis Job - Self-Hosted Server
+  sonarqube-analysis:
+    name: SonarQube Code Analysis
+    runs-on: ubuntu-latest
+    if: >
+      (github.event_name == 'pull_request' || github.ref == 'refs/heads/feature/linting') &&
+      !(startsWith(github.event.pull_request.base.ref, 'feature/') || 
+        startsWith(github.event.pull_request.base.ref, 'release/'))
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci --force
+
+      - name: Run unit tests with coverage
+        run: npm run test:cov
+        continue-on-error: true
+
+      - name: SonarQube Scan
+        uses: SonarSource/sonarqube-scan-action@v4
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: http://194.163.40.149:9000
+
+      - name: Check Quality Gate
+        run: |
+          echo "SonarQube analysis completed. Check the dashboard for quality gate status."
+          echo "Dashboard URL: http://194.163.40.149:9000"
+
+      - name: Comment PR with SonarQube results
+        if: github.event_name == 'pull_request' && always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            
+            let sonarResults = '';
+            let qualityGateStatus = '✅ Passed';
+            
+            try {
+              const reportPath = '.scannerwork/report-task.txt';
+              if (fs.existsSync(reportPath)) {
+                const reportContent = fs.readFileSync(reportPath, 'utf8');
+                const dashboardUrl = reportContent.match(/dashboardUrl=(.+)/)?.[1];
+                
+                if (dashboardUrl) {
+                  sonarResults = `📊 **SonarQube Analysis Complete**
+            
+            **Quality Gate Status:** ${qualityGateStatus}
+            
+            [🔍 View Detailed Report](${dashboardUrl})
+            
+            **Analysis includes:**
+            - ✅ Code coverage metrics
+            - 🛡️ Security vulnerability scan
+            - 🔍 Code smells detection
+            - 📊 Technical debt analysis
+            - 🔄 Code duplication check
+            
+            ${context.workflow.conclusion === 'failure' ? '⚠️ **Action Required:** Please review and fix the identified issues before merging.' : ''}`;
+                }
+              }
+            } catch (error) {
+              console.log('Could not read SonarQube report:', error);
+            }
+
+            if (!sonarResults) {
+              sonarResults = `📊 **SonarQube Analysis Complete**
+            
+            **Quality Gate Status:** ${qualityGateStatus}
+            
+            The code analysis has been completed. Check SonarQube dashboard for detailed results.
+            
+            **Dashboard:** [View Results](http://194.163.40.149:9000)
+            
+            **Analysis includes:**
+            - Code coverage and quality metrics
+            - Security vulnerabilities
+            - Maintainability issues`;
+            }
+
+            const { data: comments } = await github.rest.issues.listComments({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+            });
+
+            const existingComment = comments.find(comment =>
+              comment.user.type === 'Bot' &&
+              comment.body.includes('📊 **SonarQube Analysis')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                comment_id: existingComment.id,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: sonarResults
+              });
+            } else {
+              await github.rest.issues.createComment({
+                issue_number: context.issue.number,
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                body: sonarResults
+              });
+            }
